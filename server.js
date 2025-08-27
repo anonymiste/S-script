@@ -74,7 +74,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// --- ROUTES SÉCURISÉES ---
+// --- ROUTES ---
 app.post("/upload", authenticate, upload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).send("Aucun fichier reçu !");
     await logAction(req.user, `a uploadé ${req.file.filename}`);
@@ -113,6 +113,12 @@ app.get("/download-all", authenticate, async (req, res) => {
     await logAction(req.user, "a téléchargé toutes les images en ZIP");
 });
 
+// --- INTERFACE AUTHENTIFICATION ---
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "login.html"));
+});
+
+// --- GALERIE SÉCURISÉE ---
 app.get("/gallery", authenticate, async (req, res) => {
     fs.readdir(UPLOAD_DIR, async (err, files) => {
         if (err) return res.status(500).send("Erreur serveur");
