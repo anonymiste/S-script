@@ -26,3 +26,16 @@ app.post("/upload", upload.single("image"), (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`🚀 Serveur actif sur le port ${PORT}`));
+
+app.get("/files", (req, res) => {
+    fs.readdir("uploads", (err, files) => {
+        if (err) return res.status(500).send("Erreur serveur");
+        res.json(files);
+    });
+});
+
+app.get("/files/:name", (req, res) => {
+    const fileName = req.params.name;
+    const filePath = path.join("uploads", fileName);
+    res.download(filePath);
+});
