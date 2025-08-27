@@ -10,100 +10,96 @@ const axios = require("axios");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SECRET_KEY = "SECRET_KEY";
 
 // --- USERS ---
 const users = [
     { username: "anonymiste", password: bcrypt.hashSync("#Paul@26@", 8) }
 ];
 
+// --- CONFIG ---
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+
 // --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(UPLOAD_DIR));
 
-// --- WHATSAPP LOGGER ---
+// --- WHATSAPP LOGGER CENTRALISÉ ---
 async function sendWhatsApp(message) {
-    const phone = "22891782947";  // ton numéro
-    const apiKey = "1944847";     // ton API Key CallMeBot
+    const phone = "22891782947";
+    const apiKey = "1944847";
     try {
         await axios.get(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`);
-        console.log("✅ Message WhatsApp envoyé :", message);
+        console.log("✅ WhatsApp:", message);
     } catch (err) {
-        console.error("❌ Erreur WhatsApp :", err.message);
+        console.error("❌ WhatsApp erreur:", err.message);
     }
 }
 
-// --- LOGIN ---
+async function logAction(user, action) {
+    const msg = `[${new Date().toISOString()}] ${user.username} ${action}`;
+    console.log(msg);
+    await sendWhatsApp(msg);
+}
+
+// --- AUTHENTICATION ---
 app.post("/login", (req, res) => {
     const { username, password } = req.body;
     const user = users.find(u => u.username === username);
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (!user || !bcrypt.compareSync(password, user.password))
         return res.status(401).send("Identifiants invalides");
-    }
-    const token = jwt.sign({ username }, "SECRET_KEY", { expiresIn: "1h" });
+    
+    const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" });
     res.json({ token });
 });
 
-// --- AUTHENTICATION ---
 function authenticate(req, res, next) {
     const authHeader = req.headers["authorization"];
     if (!authHeader) return res.status(401).send("Token manquant");
+
     const token = authHeader.split(" ")[1];
-    jwt.verify(token, "SECRET_KEY", (err, user) => {
+    jwt.verify(token, SECRET_KEY, (err, user) => {
         if (err) return res.status(403).send("Token invalide");
         req.user = user;
         next();
     });
 }
 
-// --- UPLOADS ---
-const UPLOAD_DIR = path.join(__dirname, "uploads");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
-
+// --- MULTER UPLOAD ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOAD_DIR),
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // --- ROUTES SÉCURISÉES ---
-
-// Upload
 app.post("/upload", authenticate, upload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).send("Aucun fichier reçu !");
-    const logMsg = `[${new Date().toISOString()}] ${req.user.username} a uploadé ${req.file.filename}`;
-    console.log(logMsg);
-    await sendWhatsApp(logMsg);
+    await logAction(req.user, `a uploadé ${req.file.filename}`);
     res.send(`Fichier reçu : ${req.file.filename}`);
 });
 
-// Lister les fichiers
 app.get("/files", authenticate, async (req, res) => {
     fs.readdir(UPLOAD_DIR, async (err, files) => {
         if (err) return res.status(500).send("Erreur serveur");
         const images = files.filter(f => /\.(jpg|jpeg|png|gif)$/i.test(f));
-        const logMsg = `[${new Date().toISOString()}] ${req.user.username} a listé les fichiers`;
-        console.log(logMsg);
-        await sendWhatsApp(logMsg);
+        await logAction(req.user, "a listé les fichiers");
         res.json(images);
     });
 });
 
-// Télécharger un fichier
 app.get("/files/:name", authenticate, async (req, res) => {
     const fileName = req.params.name;
     const filePath = path.join(UPLOAD_DIR, fileName);
     if (!fs.existsSync(filePath)) return res.status(404).send("Fichier introuvable");
     if (!/\.(jpg|jpeg|png|gif)$/i.test(fileName)) return res.status(400).send("Fichier non autorisé");
 
-    const logMsg = `[${new Date().toISOString()}] ${req.user.username} a téléchargé ${fileName}`;
-    console.log(logMsg);
-    await sendWhatsApp(logMsg);
-
+    await logAction(req.user, `a téléchargé ${fileName}`);
     res.download(filePath);
 });
 
-// Télécharger toutes les images en ZIP
 app.get("/download-all", authenticate, async (req, res) => {
     const zipName = "all_images.zip";
     res.setHeader('Content-Disposition', `attachment; filename=${zipName}`);
@@ -114,12 +110,9 @@ app.get("/download-all", authenticate, async (req, res) => {
     archive.directory(UPLOAD_DIR, false);
     archive.finalize();
 
-    const logMsg = `[${new Date().toISOString()}] ${req.user.username} a téléchargé toutes les images en ZIP`;
-    console.log(logMsg);
-    await sendWhatsApp(logMsg);
+    await logAction(req.user, "a téléchargé toutes les images en ZIP");
 });
 
-// Galerie avancée
 app.get("/gallery", authenticate, async (req, res) => {
     fs.readdir(UPLOAD_DIR, async (err, files) => {
         if (err) return res.status(500).send("Erreur serveur");
@@ -133,16 +126,14 @@ app.get("/gallery", authenticate, async (req, res) => {
         const totalPages = Math.ceil(images.length / perPage);
         const pagedImages = images.slice((page - 1) * perPage, page * perPage);
 
-        const logMsg = `[${new Date().toISOString()}] ${req.user.username} a consulté la galerie, page ${page}, recherche: ${search || 'aucune'}`;
-        console.log(logMsg);
-        await sendWhatsApp(logMsg);
+        await logAction(req.user, `a consulté la galerie, page ${page}, recherche: ${search || 'aucune'}`);
 
         let html = `
         <!DOCTYPE html>
         <html lang="fr">
         <head>
             <meta charset="UTF-8">
-            <title>Galerie Avancée Sécurisée</title>
+            <title>Galerie Sécurisée</title>
             <style>
                 body { font-family: Arial; background:#f0f0f0; padding:20px; }
                 h1 { text-align:center; }
@@ -163,7 +154,7 @@ app.get("/gallery", authenticate, async (req, res) => {
             </style>
         </head>
         <body>
-            <h1>Galerie Avancée Sécurisée</h1>
+            <h1>Galerie Sécurisée</h1>
             <div class="download-all"><a href="/download-all">Télécharger toutes les images</a></div>
             <div class="search-box">
                 <form method="get">
@@ -173,7 +164,6 @@ app.get("/gallery", authenticate, async (req, res) => {
             </div>
             <div class="gallery">
         `;
-
         pagedImages.forEach(img => {
             html += `
                 <div class="item">
@@ -182,13 +172,10 @@ app.get("/gallery", authenticate, async (req, res) => {
                 </div>
             `;
         });
-
         html += `</div><div class="pagination">`;
-
         for(let i=1; i<=totalPages; i++){
             html += `<a href="/gallery?page=${i}${search ? '&search=' + encodeURIComponent(search) : ''}" class="${i===page?'current':''}">${i}</a>`;
         }
-
         html += `</div></body></html>`;
         res.send(html);
     });
