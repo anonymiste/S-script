@@ -33,6 +33,7 @@ img { max-width:200px; border-radius:8px; display:block; margin-bottom:8px; }
         <input type="file" id="fileInput">
         <button onclick="uploadFile()">⬆️ Upload</button>
         <button onclick="downloadAll()">⬇️ Télécharger tout</button>
+        <button onclick="deleteAllFiles()" class="delete">🗑️ Supprimer tout</button>
         <button onclick="logout()">🚪 Déconnexion</button>
     </div>
     <div class="gallery" id="gallery"></div>
@@ -135,6 +136,21 @@ async function downloadAll() {
     a.download = "all_images.zip";
     a.click();
     window.URL.revokeObjectURL(url);
+}
+
+// --- DELETE ALL ---
+async function deleteAllFiles() {
+    if (!confirm("⚠️ Voulez-vous vraiment supprimer tous les fichiers ?")) return;
+
+    try {
+        const res = await fetch("/delete-all", { method: "POST" });
+        const text = await res.text();
+        alert(text);
+        location.reload(); // recharge la page pour vider la liste
+    } catch (err) {
+        console.error(err);
+        alert("Erreur lors de la suppression !");
+    }
 }
 
 // --- AUTO SHOW APP IF TOKEN ---
