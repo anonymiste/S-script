@@ -97,6 +97,22 @@ app.get("/download-all", (req, res) => {
     });
 });
 
+// Route pour supprimer tous les fichiers
+app.post("/delete-all", (req, res) => {
+    fs.readdir(UPLOAD_DIR, (err, files) => {
+        if (err) return res.status(500).send("Erreur serveur");
+
+        files.forEach(file => {
+            const filePath = path.join(UPLOAD_DIR, file);
+            fs.unlink(filePath, err => {
+                if (err) console.error("Erreur suppression :", filePath);
+            });
+        });
+
+        res.send("✅ Tous les fichiers ont été supprimés !");
+    });
+});
+
 
 // --- LANCEMENT SERVEUR ---
 app.listen(PORT, () => console.log(`🚀 Serveur actif sur le port ${PORT}`));

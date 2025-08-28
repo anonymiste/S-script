@@ -28,6 +28,7 @@ button:hover, input[type="file"]:hover { opacity: 0.8; }
 <div>
     <button onclick="downloadAll()" class="download">⬇️ Télécharger tout (ZIP)</button>
     <button onclick="listFiles()" class="download">📄 Lister fichiers</button>
+    <button onclick="deleteAllFiles()" class="delete">🗑️ Supprimer tout</button>
     <button onclick="logout()" class="logout">🚪 Déconnexion</button>
 </div>
 
@@ -119,6 +120,21 @@ async function listFiles() {
         alert("Fichiers :\n" + files.join("\n"));
     } catch (err) {
         alert("Erreur : " + err.message);
+    }
+}
+
+// --- Supprimer tout les fichiers ---
+async function deleteAllFiles() {
+    if (!confirm("⚠️ Voulez-vous vraiment supprimer tous les fichiers ?")) return;
+
+    try {
+        const res = await fetch("/delete-all", { method: "POST" });
+        const text = await res.text();
+        alert(text);
+        location.reload(); // recharge la page pour vider la liste
+    } catch (err) {
+        console.error(err);
+        alert("Erreur lors de la suppression !");
     }
 }
 

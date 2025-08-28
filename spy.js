@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
-const wifi = require("node-wifi");
+// const wifi = require("node-wifi");
 const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
@@ -25,7 +25,7 @@ let jwtToken = null;
 let uploadedFiles = [];
 
 // ---------------- INITIALISATION ----------------
-wifi.init({ iface: null });
+// wifi.init({ iface: null });
 
 if (fs.existsSync(HISTORY_FILE)) {
     uploadedFiles = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
