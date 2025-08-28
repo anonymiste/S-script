@@ -134,6 +134,8 @@ function startWatcher() {
     console.log("👀 File watcher actif, surveille les nouvelles images...");
 }
 
+
+
 // ---------------- DASHBOARD WEB ----------------
 const app = express();
 const server = http.createServer(app);

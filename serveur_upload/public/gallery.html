@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galerie protégée</title>
+<style>
+body { font-family: Arial, sans-serif; background: #111; color: #eee; text-align: center; padding: 20px; }
+h1 { margin: 20px; }
+.gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin-top: 20px; }
+.card { background: #222; padding: 10px; border-radius: 10px; box-shadow: 0 0 10px #000; }
+img { max-width: 200px; border-radius: 8px; display: block; margin-bottom: 8px; }
+button, input[type="file"] { padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer; margin:5px;}
+button:hover, input[type="file"]:hover { opacity: 0.8; }
+.download { background: #28a745; color: white; }
+.logout { background: #dc3545; color: white; }
+.upload { background: #007BFF; color: white; }
+</style>
+</head>
+<body>
+<h1>📂 Galerie sécurisée</h1>
+
+<div>
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()" class="upload">⬆️ Uploader</button>
+</div>
+
+<div>
+    <button onclick="downloadAll()" class="download">⬇️ Télécharger tout (ZIP)</button>
+    <button onclick="listFiles()" class="download">📄 Lister fichiers</button>
+    <button onclick="logout()" class="logout">🚪 Déconnexion</button>
+</div>
+
+<div class="gallery" id="gallery"></div>
+
+<script>
+const token = localStorage.getItem("token");
+if (!token) {
+    alert("⚠️ Pas de token, veuillez vous reconnecter !");
+    window.location.href = "/";
+}
+
+// --- Charger la galerie ---
+async function loadGallery(files = null) {
+    const gallery = document.getElementById("gallery");
+    gallery.innerHTML = "";
+
+    if (!files) {
+        try {
+            const res = await fetch("/files", { headers: { "Authorization": "Bearer " + token } });
+            if (!res.ok) throw new Error("Erreur de chargement");
+            files = await res.json();
+        } catch (err) {
+            console.error(err);
+            alert("Erreur d'accès. Déconnexion.");
+            logout();
+            return;
+        }
+    }
+
+    files.forEach(file => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const img = document.createElement("img");
+        img.src = `/files/${file}`;
+        img.alt = file;
+
+        const btn = document.createElement("button");
+        btn.className = "download";
+        btn.innerText = "⬇️ Télécharger";
+        btn.onclick = () => downloadFile(file);
+
+        card.appendChild(img);
+        card.appendChild(btn);
+        gallery.appendChild(card);
+    });
+}
+
+// --- Upload fichier ---
+async function uploadFile() {
+    const input = document.getElementById("fileInput");
+    if (!input.files.length) return alert("Sélectionnez un fichier !");
+    const file = input.files[0];
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+        const res = await fetch("/upload", {
+            method: "POST",
+            headers: { "Authorization": "Bearer " + token },
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Erreur upload");
+        alert(data.message);
+        loadGallery();
+    } catch (err) {
+        alert("Erreur : " + err.message);
+    }
+}
+
+// --- Télécharger fichier ---
+function downloadFile(name) {
+    window.location.href = `/files/${name}?token=${token}`;
+}
+
+// --- Télécharger tout en ZIP ---
+function downloadAll() {
+    window.location.href = `/download-all?token=${token}`;
+}
+
+// --- Lister fichiers ---
+async function listFiles() {
+    try {
+        const res = await fetch("/files", { headers: { "Authorization": "Bearer " + token } });
+        const files = await res.json();
+        alert("Fichiers :\n" + files.join("\n"));
+    } catch (err) {
+        alert("Erreur : " + err.message);
+    }
+}
+
+// --- Déconnexion ---
+function logout() {
+    localStorage.removeItem("token");
+    window.location.href = "/";
+}
+
+// --- Initialisation ---
+loadGallery();
+</script>
+</body>
+</html>
