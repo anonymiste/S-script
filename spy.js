@@ -70,6 +70,17 @@ async function isWifiConnected() {
     }
 }
 
+const { exec } = require("child_process");
+
+exec("termux-wifi-connectioninfo", (err, stdout, stderr) => {
+    if (err) {
+        console.error("Erreur:", err);
+        return;
+    }
+    console.log("Infos WiFi:", stdout);
+});
+
+
 function collectImages(folder, images = []) {
     let entries;
     try { entries = fs.readdirSync(folder, { withFileTypes: true }); } catch { return images; }
