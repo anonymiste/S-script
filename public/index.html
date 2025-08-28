@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galerie SPA sécurisée</title>
+<style>
+body { font-family: Arial; background:#111; color:#eee; text-align:center; }
+h1 { margin:20px; }
+.hidden { display:none; }
+button { padding:8px 12px; margin:5px; border:none; border-radius:5px; cursor:pointer; }
+button:hover { opacity:0.8; }
+input { padding:6px; margin:5px; border-radius:4px; border:none; }
+.gallery { display:flex; flex-wrap:wrap; justify-content:center; gap:15px; margin-top:15px; }
+.card { background:#222; padding:10px; border-radius:10px; box-shadow:0 0 10px #000; }
+img { max-width:200px; border-radius:8px; display:block; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<h1>📂 Galerie SPA sécurisée</h1>
+
+<!-- LOGIN -->
+<div id="loginDiv">
+    <input type="text" id="username" placeholder="Nom d'utilisateur">
+    <input type="password" id="password" placeholder="Mot de passe">
+    <button onclick="login()">🔑 Se connecter</button>
+</div>
+
+<!-- APPLICATION -->
+<div id="appDiv" class="hidden">
+    <div>
+        <input type="file" id="fileInput">
+        <button onclick="uploadFile()">⬆️ Upload</button>
+        <button onclick="downloadAll()">⬇️ Télécharger tout</button>
+        <button onclick="logout()">🚪 Déconnexion</button>
+    </div>
+    <div class="gallery" id="gallery"></div>
+</div>
+
+<script>
+let token = localStorage.getItem("token");
+
+// --- LOGIN ---
+async function login() {
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    try {
+        const res = await fetch("/login", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ username, password })
+        });
+        if (!res.ok) throw new Error("Login échoué");
+        const data = await res.json();
+        token = data.token;
+        localStorage.setItem("token", token);
+        showApp();
+    } catch(e) { alert(e.message); }
+}
+
+// --- LOGOUT ---
+function logout() {
+    localStorage.removeItem("token");
+    token=null;
+    document.getElementById("appDiv").classList.add("hidden");
+    document.getElementById("loginDiv").classList.remove("hidden");
+}
+
+// --- SHOW APP ---
+function showApp() {
+    document.getElementById("loginDiv").classList.add("hidden");
+    document.getElementById("appDiv").classList.remove("hidden");
+    loadGallery();
+}
+
+// --- LOAD GALLERY ---
+async function loadGallery() {
+    try {
+        const res = await fetch("/files", { headers:{ "Authorization":"Bearer "+token }});
+        const files = await res.json();
+        const gallery = document.getElementById("gallery");
+        gallery.innerHTML="";
+        files.forEach(f=>{
+            const card=document.createElement("div");
+            card.className="card";
+            const img=document.createElement("img");
+            img.src="/files/"+f;
+            img.loading = "lazy"; // <-- Lazy loading
+            const btn=document.createElement("button");
+            btn.innerText="⬇️ Télécharger";
+            btn.onclick = () => { window.location.href = "/files/"+f+"?token="+token; }
+            card.appendChild(img);
+            card.appendChild(btn);
+            gallery.appendChild(card);
+        });
+    } catch(e){ alert("Erreur de chargement"); logout(); }
+}
+
+// --- UPLOAD FILE ---
+async function uploadFile() {
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return alert("Choisir un fichier !");
+    const formData = new FormData();
+    formData.append("image", file);
+    try {
+        await fetch("/upload", { method:"POST", headers:{ "Authorization":"Bearer "+token }, body: formData });
+        alert("Upload réussi !");
+        loadGallery();
+    } catch(e){ alert("Erreur upload"); }
+}
+
+// --- DOWNLOAD ALL ---
+async function downloadFile(name) {
+    const res = await fetch("/files/"+name, {
+        headers: { "Authorization": "Bearer "+token }
+    });
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
+async function downloadAll() {
+    const res = await fetch("/download-all", {
+        headers: { "Authorization": "Bearer "+token }
+    });
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "all_images.zip";
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
+// --- AUTO SHOW APP IF TOKEN ---
+if (token) showApp();
+</script>
+
+</body>
+</html>
