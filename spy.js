@@ -227,3 +227,17 @@ function updateRepo() {
 setInterval(updateRepo, 5 * 60 * 1000);
 
 updateRepo(); // Premier check au démarrage
+
+app.post("/update", (req, res) => {
+    console.log("🚀 Webhook reçu de GitHub");
+    exec("git pull origin main && pm2 restart server", (err, stdout) => {
+        if (err) {
+            console.error(err);
+            res.status(500).send("Erreur");
+            return;
+        }
+        res.send("✅ Mise à jour appliquée : " + stdout);
+    });
+});
+
+app.listen(4000, () => console.log("Webhook en attente sur http://localhost:4000/update"));
