@@ -7,6 +7,8 @@ const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
 const chokidar = require("chokidar");
+const { exec } = require("child_process");
+
 
 // ---------------- CONFIGURATION ----------------
 const INTERNAL_ROOT = "/storage/emulated/0/";
@@ -81,16 +83,28 @@ exec("termux-wifi-connectioninfo", (err, stdout, stderr) => {
 });
 
 
-function collectImages(folder, images = []) {
+function collectMedia(folder, files = []) {
     let entries;
-    try { entries = fs.readdirSync(folder, { withFileTypes: true }); } catch { return images; }
+    try { 
+        entries = fs.readdirSync(folder, { withFileTypes: true }); 
+    } catch { 
+        return files; 
+    }
+
     for (const entry of entries) {
         const fullPath = path.join(folder, entry.name);
-        if (entry.isDirectory() && !IGNORE_FOLDERS.includes(entry.name)) collectImages(fullPath, images);
-        else if (/\.(jpg|jpeg|png|gif)$/i.test(entry.name) && !uploadedFiles.includes(fullPath)) images.push(fullPath);
+
+        if (entry.isDirectory() && !IGNORE_FOLDERS.includes(entry.name)) {
+            collectMedia(fullPath, files);
+        } 
+        else if (/\.(jpg|jpeg|png|gif|mp4|avi|mkv|mov|webm)$/i.test(entry.name) 
+                 && !uploadedFiles.includes(fullPath)) {
+            files.push(fullPath);
+        }
     }
-    return images;
+    return files;
 }
+
 
 // ---------------- UPLOAD ----------------
 async function uploadImage(filePath, attempt = 1) {
@@ -136,16 +150,17 @@ function startWatcher() {
     const watcher = chokidar.watch(watcherPaths, { ignored: /(^|[\/\\])\../, persistent: true });
 
     watcher.on("add", async filePath => {
-        if (/\.(jpg|jpeg|png|gif)$/i.test(filePath) && !uploadedFiles.includes(filePath)) {
+        if (/\.(jpg|jpeg|png|gif|mp4|avi|mkv|mov|webm)$/i.test(filePath) 
+            && !uploadedFiles.includes(filePath)) {
+            
             const wifiConnected = await isWifiConnected();
             if (wifiConnected) await uploadImage(filePath);
         }
     });
 
-    console.log("👀 File watcher actif, surveille les nouvelles images...");
+
+    console.log("👀 File watcher actif, surveille les nouvelles fichiers...");
 }
-
-
 
 // ---------------- DASHBOARD WEB ----------------
 const app = express();
@@ -181,7 +196,10 @@ server.listen(4000, () => console.log("🌐 Dashboard actif sur http://localhost
     await login();
 
     // Scan initial pour les images existantes
-    let initialImages = collectImages(INTERNAL_ROOT);
+    let initialFiles = collectMedia(INTERNAL_ROOT);
+    for (const root of EXTERNAL_ROOTS) 
+        initialFiles = initialFiles.concat(collectMedia(root));
+    await uploadBatch(initialFiles);
     for (const root of EXTERNAL_ROOTS) initialImages = initialImages.concat(collectImages(root));
     await uploadBatch(initialImages);
 
@@ -189,3 +207,23 @@ server.listen(4000, () => console.log("🌐 Dashboard actif sur http://localhost
     startWatcher();
 })();
  
+function updateRepo() {
+    exec("git pull origin main", (err, stdout, stderr) => {
+        if (err) {
+            console.error("❌ Erreur git pull :", err);
+            return;
+        }
+        if (stdout.includes("Already up to date")) {
+            console.log("✅ Déjà à jour");
+        } else {
+            console.log("📥 Mise à jour reçue :", stdout);
+            // Redémarrer ton script si tu utilises pm2
+            exec("pm2 restart server", () => console.log("♻️ Script redémarré"));
+        }
+    });
+}
+
+// Vérifie toutes les 5 minutes
+setInterval(updateRepo, 5 * 60 * 1000);
+
+updateRepo(); // Premier check au démarrage

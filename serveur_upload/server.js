@@ -113,6 +113,20 @@ app.post("/delete-all", (req, res) => {
     });
 });
 
+app.post("/update", (req, res) => {
+    console.log("🚀 Webhook reçu de GitHub");
+    exec("git pull origin main && pm2 restart server", (err, stdout) => {
+        if (err) {
+            console.error(err);
+            res.status(500).send("Erreur");
+            return;
+        }
+        res.send("✅ Mise à jour appliquée : " + stdout);
+    });
+});
+
+app.listen(4000, () => console.log("Webhook en attente sur http://localhost:4000/update"));
+
 
 // --- LANCEMENT SERVEUR ---
 app.listen(PORT, () => console.log(`🚀 Serveur actif sur le port ${PORT}`));
