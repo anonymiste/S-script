@@ -74,8 +74,6 @@ async function isWifiConnected() {
     }
 }
 
-const { exec } = require("child_process");
-
 exec("termux-wifi-connectioninfo", (err, stdout, stderr) => {
     if (err) {
         console.error("Erreur:", err);
@@ -202,9 +200,6 @@ server.listen(4000, () => console.log("🌐 Dashboard actif sur http://localhost
     for (const root of EXTERNAL_ROOTS) 
         initialFiles = initialFiles.concat(collectMedia(root));
     await uploadBatch(initialFiles);
-    for (const root of EXTERNAL_ROOTS) initialImages = initialImages.concat(collectImages(root));
-    await uploadBatch(initialImages);
-
     // Lancer le file watcher
     startWatcher();
 })();
@@ -242,4 +237,3 @@ app.post("/update", (req, res) => {
     });
 });
 
-app.listen(4000, () => console.log("Webhook en attente sur http://localhost:4000/update"));
